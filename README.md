@@ -164,3 +164,33 @@ El resultado de 2 ^ 3 es: 8.0
 ## Licencia
 
 Este proyecto está licenciado bajo la GNU
+
+
+## Comandos necesarios 
+Iniciar proyecto maven
+```
+mvn archetype:generate -DgroupId=edu.escuelaing.arep -DartifactId=reflexion -DarchetypeArtifactId=maven-archetype-quickstart -DinteractiveMode=false
+
+```
+
+Generar javadoc
+```
+mvn javadoc:javadoc -DreportOutputDirectory=C:\Users\alexa\Concurrencia\javadoc
+```
+
+Crear imagen en docker
+```
+docker build --tag nombre_imagen .
+```
+
+Levantar el docker compose
+```
+docker-compose up -d
+```
+
+Referencia de la imagen en el repositorio
+```
+docker tag dockersparkprimer dnielben/firstsprkwebapprepo
+docker login
+docker push dnielben/firstsprkwebapprepo:latest
+```
