@@ -1,0 +1,261 @@
+package edu.escuelaing.arep.controller;
+
+import edu.escuelaing.arep.Annotations.GetMapping;
+import edu.escuelaing.arep.Annotations.RequestMapping;
+import edu.escuelaing.arep.Annotations.RequestParam;
+import edu.escuelaing.arep.Annotations.RestController;
+import edu.escuelaing.arep.service.Parcial1Service;
+
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api")
+public class Parcial1Controller {
+
+    private Parcial1Service service = new Parcial1Service();
+    private Map<String, Method> routes = new HashMap<>();
+
+    public Parcial1Controller() {
+        for (Method method : this.getClass().getMethods()) {
+            if (method.isAnnotationPresent(GetMapping.class)) {
+                GetMapping getMapping = method.getAnnotation(GetMapping.class);
+                String fullRoute = "/api" + getMapping.value();
+                System.out.println("Registrando ruta: " + fullRoute);
+                routes.put(getMapping.value(), method);
+            }
+        }
+    }
+
+    public String routeRequest(String path, Map<String, String> queryParams) throws Exception {
+        Method method = routes.get(path);
+        if (method != null) {
+            Object[] params = new Object[method.getParameterCount()];
+            for (int i = 0; i < method.getParameterCount(); i++) {
+                if (method.getParameters()[i].isAnnotationPresent(RequestParam.class)) {
+                    RequestParam requestParam = method.getParameters()[i].getAnnotation(RequestParam.class);
+                    params[i] = queryParams.getOrDefault(requestParam.value(), requestParam.defaultValue());
+                }
+            }
+            return (String) method.invoke(this, params);
+        }
+        return "404 Not Found";
+    }
+
+    @GetMapping("/getvalue")
+    public String getValueBag(@RequestParam(value = "function") String function, 
+                              @RequestParam(value = "symbol") String symbol, 
+                              @RequestParam(value = "interval", defaultValue = "") String interval) {
+        return service.getValueApi(function, symbol, interval);
+    }
+}
+
+
+package edu.escuelaing.arep.service;
+
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+
+/**
+ * Esta clase contiene la lógica para conectarse con la API de AlphaVantage y recuperar los datos bursátiles.
+ */
+public class Parcial1Service {
+
+    // Llave de la API y configuración básica
+    private static final String KEY = "demo";
+    private static final String USER_AGENT = "Mozilla/5.0";
+    private static final String GET_URL = "https://www.alphavantage.co/query?";
+
+    /**
+     * Método que se conecta a la API de AlphaVantage y recupera los datos de bolsa.
+     * @param function Tipo de valoración (Intraday, Daily, Weekly, etc.).
+     * @param symbol Símbolo de la empresa.
+     * @param interval Intervalo de tiempo (solo para valoraciones intraday).
+     * @return Respuesta de la API como cadena JSON.
+     */
+    public String getValueApi(String function, String symbol, String interval) {
+        try {
+            // Construcción de la URL para la API
+            URL obj = new URL(GET_URL + "function=" + function + "&symbol=" + symbol 
+                    + ((interval != "") ? "&interval=" + interval : "") + "&apikey=" + KEY);
+            
+            // Establecer conexión HTTP
+            HttpURLConnection con = (HttpURLConnection) obj.openConnection();
+            con.setRequestMethod("GET");
+            con.setRequestProperty("User-Agent", USER_AGENT);
+            String responseFinal = "";
+
+            // Obtener el código de respuesta
+            int responseCode = con.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_OK) { // Si la respuesta es exitosa
+                BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
+                String inputLine;
+                StringBuffer response = new StringBuffer();
+
+                // Leer la respuesta de la API
+                while ((inputLine = in.readLine()) != null) {
+                    response.append(inputLine);
+                }
+                in.close();
+                responseFinal = response.toString();
+            } else {
+                System.out.println("GET request not worked");
+            }
+            return responseFinal;
+        } catch (Exception e) {
+            return "No existe información";
+        }
+    }
+}
+
+
+
+package edu.escuelaing.arep;
+
+import edu.escuelaing.arep.controller.Parcial1Controller;
+import java.net.*;
+import java.io.*;
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Clase principal que ejecuta el servidor HTTP y maneja las solicitudes entrantes.
+ */
+public class Parcial1Application {
+
+    public static void main(String[] args) throws Exception {
+        // Inicializa el controlador
+        Parcial1Controller controller = new Parcial1Controller();
+        // Crea el servidor en el puerto 35000
+        ServerSocket serverSocket = new ServerSocket(35000);
+
+        while (true) {
+            try (Socket clientSocket = serverSocket.accept()) {
+                // Lee la solicitud del cliente
+                BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                OutputStream out = clientSocket.getOutputStream();
+
+                // Procesa la solicitud y obtiene la ruta y parámetros
+                String inputLine = in.readLine();
+                if (inputLine != null && !inputLine.isEmpty()) {
+                    System.out.println("Solicitud recibida: " + inputLine);
+                    String[] requestParts = inputLine.split(" ");
+                    String path = requestParts[1].split("\\?")[0];
+
+                    if (path.equals("/")) {
+                        // Servir el archivo HTML index.html desde src/main/resources/static
+                        serveStaticResource(out, "index.html");
+                    } else {
+                        // Manejar otras solicitudes (como calcular potencia)
+                        Map<String, String> queryParams = getQueryParams(requestParts[1]);
+                        String response = controller.routeRequest(path, queryParams);
+                        out.write(("HTTP/1.1 200 OK\r\n" +
+                                   "Content-Type: text/html\r\n" +
+                                   "\r\n" +
+                                   response).getBytes());
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Sirve un archivo estático desde el directorio resources/static.
+     * @param out El OutputStream para enviar la respuesta.
+     * @param resource El nombre del archivo a servir.
+     */
+    private static void serveStaticResource(OutputStream out, String resource) throws IOException {
+        // Usa el ClassLoader para obtener el recurso dentro de src/main/resources/static
+        InputStream fileStream = Parcial1Application.class.getClassLoader().getResourceAsStream("static/" + resource);
+
+        if (fileStream != null) {
+            byte[] fileContent = fileStream.readAllBytes();
+            out.write(("HTTP/1.1 200 OK\r\n" +
+                       "Content-Type: text/html\r\n" +
+                       "\r\n").getBytes());
+            out.write(fileContent);
+        } else {
+            // Si el archivo no se encuentra
+            out.write(("HTTP/1.1 404 Not Found\r\n" +
+                       "Content-Type: text/html\r\n" +
+                       "\r\n" +
+                       "<h1>404 Not Found</h1>").getBytes());
+        }
+    }
+
+    /**
+     * Método auxiliar para extraer los parámetros de una solicitud.
+     * @param request Cadena que contiene la solicitud HTTP.
+     * @return Mapa de parámetros extraídos.
+     */
+    private static Map<String, String> getQueryParams(String request) {
+        Map<String, String> queryParams = new HashMap<>();
+        if (request.contains("?")) {
+            String[] pairs = request.split("\\?")[1].split("&");
+            for (String pair : pairs) {
+                String[] keyValue = pair.split("=");
+                queryParams.put(keyValue[0], keyValue.length > 1 ? keyValue[1] : "");
+            }
+        }
+        return queryParams;
+    }
+}
+
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Form Example</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <h1>Form with GET</h1>
+        <form action="/value">
+            <label for="function">Función:</label>
+            <select id="function" name="function">
+                <option value="TIME_SERIES_INTRADAY">Intraday</option>
+                <option value="TIME_SERIES_DAILY">Daily</option>
+                <option value="TIME_SERIES_WEEKLY">Weekly</option>
+                <option value="TIME_SERIES_MONTHLY">Monthly</option>
+              </select>
+            <br>
+            <label for="symbol">Empresa:</label>
+            <input type="text" id="symbol" name="symbol"><br><br>
+            <br>
+            <label for="interval">Intervalo:</label>
+            <select id="interval" name="interval">
+                <option value="">N/A</option>
+                <option value="1min">1min</option>
+                <option value="5min">5min</option>
+                <option value="15min">15min</option>
+                <option value="30min">30min</option>
+                <option value="60min">60min</option>
+              </select>
+              <br>
+            <input type="button" value="Conusltar" onclick="loadGetMsg()">
+        </form> 
+        <div id="getrespmsg"></div>
+
+        <script>
+            function loadGetMsg() {
+                let functionVar = document.getElementById("function").value;
+                console.log(functionVar);
+                let symbolVar = document.getElementById("symbol").value;
+                console.log(symbolVar);
+                let intervalVar = document.getElementById("interval").value;
+                console.log(intervalVar)
+                const xhttp = new XMLHttpRequest();
+                xhttp.onload = function() {
+                    document.getElementById("getrespmsg").innerHTML =
+                    this.responseText;
+                }
+                xhttp.open("GET", "/getvalue?function="+functionVar+"&symbol="+symbolVar+"&interval="+intervalVar);
+                //console.log(responseText);
+                xhttp.send();
+            }
+        </script>
+    </body>
+</html>
